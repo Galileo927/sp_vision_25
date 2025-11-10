@@ -66,28 +66,26 @@ std::list<Armor> YOLOV8::detect(const cv::Mat & raw_img, int frame_count)
   }
 
   cv::Mat bgr_img;
+  cv::Point2f offset = {0, 0};
   if (use_roi_) {
-    if (roi_.width == -1) {  // -1 表示该维度不裁切
-      roi_.width = raw_img.cols;
+    // Ensure ROI is valid and within image bounds
+    roi_ = roi_ & cv::Rect(0, 0, raw_img.cols, raw_img.rows);
+    if (roi_.width <= 0 || roi_.height <= 0) {
+        // Fallback to full image if ROI is invalid
+        bgr_img = raw_img;
+    } else {
+        bgr_img = raw_img(roi_);
+        offset = cv::Point2f(roi_.x, roi_.y);
     }
-    if (roi_.height == -1) {  // -1 表示该维度不裁切
-      roi_.height = raw_img.rows;
-    }
-    bgr_img = raw_img(roi_);
   } else {
     bgr_img = raw_img;
   }
 
-  auto x_scale = static_cast<double>(416) / bgr_img.rows;
-  auto y_scale = static_cast<double>(416) / bgr_img.cols;
-  auto scale = std::min(x_scale, y_scale);
-  auto h = static_cast<int>(bgr_img.rows * scale);
-  auto w = static_cast<int>(bgr_img.cols * scale);
+  // Efficient preprocessing
+  double scale;
+  cv::Mat input(416, 416, CV_8UC3, cv::Scalar(114, 114, 114));
+  tools::letterbox(bgr_img, input, scale);
 
-  // preproces
-  auto input = cv::Mat(416, 416, CV_8UC3, cv::Scalar(0, 0, 0));
-  auto roi = cv::Rect(0, 0, w, h);
-  cv::resize(bgr_img, input(roi), {w, h});
   ov::Tensor input_tensor(ov::element::u8, {1, 416, 416, 3}, input.data);
 
   /// infer
@@ -100,11 +98,11 @@ std::list<Armor> YOLOV8::detect(const cv::Mat & raw_img, int frame_count)
   auto output_shape = output_tensor.get_shape();
   cv::Mat output(output_shape[1], output_shape[2], CV_32F, output_tensor.data());
 
-  return parse(scale, output, raw_img, frame_count);
+  return parse(scale, output, raw_img, frame_count, offset);
 }
 
 std::list<Armor> YOLOV8::parse(
-  double scale, cv::Mat & output, const cv::Mat & bgr_img, int frame_count)
+  double scale, cv::Mat & output, const cv::Mat & bgr_img, int frame_count, const cv::Point2f& offset)
 {
   // for each row: xywh + classess
   cv::transpose(output, output);
@@ -151,17 +149,22 @@ std::list<Armor> YOLOV8::parse(
   cv::dnn::NMSBoxes(boxes, confidences, score_threshold_, nms_threshold_, indices);
 
   std::list<Armor> armors;
-  for (const auto & i : indices) {
-    sort_keypoints(armors_key_points[i]);
-    if (use_roi_) {
-      armors.emplace_back(ids[i], confidences[i], boxes[i], armors_key_points[i], offset_);
-    } else {
-      armors.emplace_back(ids[i], confidences[i], boxes[i], armors_key_points[i]);
-    }
+  armors.resize(indices.size());
+
+  #pragma omp parallel for
+  for (size_t i = 0; i < indices.size(); ++i) {
+    int idx = indices[i];
+    sort_keypoints(armors_key_points[idx]);
+    auto & armor = *(std::next(armors.begin(), i));
+    armor = Armor(ids[idx], confidences[idx], boxes[idx], armors_key_points[idx], offset);
   }
 
   for (auto it = armors.begin(); it != armors.end();) {
     it->pattern = get_pattern(bgr_img, *it);
+    if (it->pattern.empty()) {
+      it = armors.erase(it);
+      continue;
+    }
     classifier_.classify(*it);
 
     if (!check_name(*it)) {
