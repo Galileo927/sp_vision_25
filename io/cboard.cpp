@@ -76,7 +76,9 @@ void CBoard::callback(const can_frame & frame)
     auto w = (int16_t)(frame.data[6] << 8 | frame.data[7]) / 1e4;
 
     if (std::abs(x * x + y * y + z * z + w * w - 1) > 1e-2) {
-      tools::logger()->warn("Invalid q: {} {} {} {}", w, x, y, z);
+      tools::logger()->warn(
+        "IMU data format error or invalid quaternion. Received q(w,x,y,z): {} {} {} {}. Check data format.",
+        w, x, y, z);
       return;
     }
 
