@@ -51,7 +51,9 @@ private:
   ArmorType get_type(const Armor & armor);
   cv::Point2f get_center_norm(const cv::Mat & bgr_img, const cv::Point2f & center) const;
 
-  std::list<Armor> parse(double scale, cv::Mat & output, const cv::Mat & bgr_img, int frame_count);
+  std::list<Armor> parse(
+    double scale, cv::Mat & output, const cv::Mat & bgr_img, int frame_count,
+    const cv::Point2f & offset);
 
   void save(const Armor & armor) const;
   void draw_detections(const cv::Mat & img, const std::list<Armor> & armors, int frame_count) const;
