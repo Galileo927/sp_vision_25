@@ -28,4 +28,22 @@ void draw_text(
   cv::putText(img, text, point, cv::FONT_HERSHEY_SIMPLEX, font_scale, color, thickness);
 }
 
+void letterbox(const cv::Mat & image, cv::Mat & out, double & scale)
+{
+  int w = image.cols;
+  int h = image.rows;
+  int _w = out.cols;
+  int _h = out.rows;
+  scale = std::min(static_cast<double>(_w) / w, static_cast<double>(_h) / h);
+  int new_w = static_cast<int>(w * scale);
+  int new_h = static_cast<int>(h * scale);
+  cv::Mat resized_img;
+  cv::resize(image, resized_img, cv::Size(new_w, new_h));
+  int top = (_h - new_h) / 2;
+  int bottom = _h - new_h - top;
+  int left = (_w - new_w) / 2;
+  int right = _w - new_w - left;
+  cv::copyMakeBorder(resized_img, out, top, bottom, left, right, cv::BORDER_CONSTANT, cv::Scalar(114, 114, 114));
+}
+
 }  // namespace tools

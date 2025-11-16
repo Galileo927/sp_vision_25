@@ -327,7 +327,7 @@ void YOLOV8::sort_keypoints(std::vector<cv::Point2f> & keypoints)
 std::list<Armor> YOLOV8::postprocess(
   double scale, cv::Mat & output, const cv::Mat & bgr_img, int frame_count)
 {
-  return parse(scale, output, bgr_img, frame_count);
+  return parse(scale, output, bgr_img, frame_count, {0, 0});
 }
 
 }  // namespace auto_aim

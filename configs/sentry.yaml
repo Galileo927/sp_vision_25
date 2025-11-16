@@ -11,6 +11,7 @@ yolov5_model_path: assets/yolov5.xml
 device: GPU
 min_confidence: 0.8
 use_traditional: true
+model: assets/yolo11_buff_int8.xml
 
 #####-----ROI-----#####
 roi: 
@@ -72,6 +73,8 @@ right_yaw_offset: -0.6
 decision_speed: 10 # rad/s
 high_speed_delay_time: 0.026 # s
 low_speed_delay_time: 0.010 # s
+fire_gap_time: 0.1  # 射击间隔时间 (s)
+predict_time: 0.1   # 预测时间 (s)
 
 #####-----shooter参数-----#####
 first_tolerance: 5 # 近距离射击容差，degree

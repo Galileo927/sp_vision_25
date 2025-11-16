@@ -22,6 +22,8 @@ void draw_text(
   cv::Mat & img, const std::string & text, const cv::Point & point,
   const cv::Scalar & color = {0, 255, 255}, double font_scale = 1.0, int thickness = 2);
 
+void letterbox(const cv::Mat & image, cv::Mat & out, double & scale);
+
 }  // namespace tools
 
 #endif  // TOOLS__IMG_TOOLS_HPP
