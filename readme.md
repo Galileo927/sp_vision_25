@@ -517,6 +517,72 @@ auto aim_point = calculate_predication_point(buff_target, shoot_delay);
 3. **工程化EKF**：完全的C++实现，集成异常处理和统计检验
 4. **实时性能**：优化算法复杂度，满足实时性要求
 
+### 6.6 常见问题与调试
+
+#### C板 USB 虚拟串口转 CAN 配置
+
+RoboMaster 开发板 C 型自带 USB 接口，可以通过固件配置为 USB 虚拟串口 (VCP) 模式。如果使用 Type-C 数据线直连电脑，需按以下步骤配置 SocketCAN：
+
+**前提条件**
+- 下位机固件支持：C 板代码需实现“将 CAN 数据打包通过 USB 虚拟串口发送”的功能，或使用支持 USB-CAN 透传的固件。
+- 操作系统：必须在 Linux (Ubuntu) 环境下运行（虚拟机或双系统均可）。Windows 下无法直接使用 SocketCAN。
+
+**操作步骤 (Linux 终端)**
+
+1. **确认设备连接**
+   插上 Type-C 线后，在终端输入：
+   ```bash
+   ls /dev/ttyACM*
+   ```
+   应能看到 `/dev/ttyACM0`（或 ACM1 等）。若无，说明 C 板未上电或固件未开启 USB 功能。
+
+2. **安装工具**
+   需要 `can-utils` 工具包：
+   ```bash
+   sudo apt update
+   sudo apt install can-utils net-tools
+   ```
+
+3. **挂载 CAN 接口 (关键步骤)**
+   使用 `slcand` 工具将串口“伪装”为 CAN 接口。假设设备为 `/dev/ttyACM0`：
+   ```bash
+   # 1. 启动 slcand 守护进程
+   # -o: 打开设备; -c: 关闭时复位; -s8: 设置波特率为 1000000 (1Mbps)
+   sudo slcand -o -c -s8 /dev/ttyACM0 can0
+
+   # 2. 启用接口
+   sudo ip link set up can0
+
+   # 3. 设置队列长度 (可选，防止丢包)
+   sudo ifconfig can0 txqueuelen 1000
+   ```
+
+4. **验证数据**
+   使用 `candump` 查看数据：
+   ```bash
+   candump can0
+   ```
+   若终端显示类似 `can0  100   [8]  ...` 的数据，说明物理链路已通。
+
+5. **运行测试程序**
+   确保配置文件（如 `standard3.yaml`）中 `can_interface` 设置为 `can0`，然后运行：
+   ```bash
+   ./build/tests/cboard_test configs/standard3.yaml
+   ```
+
+**常见问题**
+- **报错 `ioctl: Input/output error`**：可能是波特率不对或 C 板重启。重新插拔 USB 线，执行 `sudo killall slcand` 杀掉旧进程，然后重做第 3 步。
+- **`candump` 无数据**：
+  - 检查 C 板代码是否在发送数据。
+  - 检查 C 板发送协议是否为标准 SLCAN 协议（若为自定义串口数据流，需修改 `socketcan.hpp` 适配）。
+
+#### IMU 数据校验失败处理
+
+当主控板发来的 IMU 数据（四元数）不符合规范（模长不为 1，误差超过 `1e-2`）时，程序会执行以下逻辑：
+
+1.  **打印警告日志**：输出 `IMU data format error or invalid quaternion...`，并显示接收到的错误数值。
+2.  **丢弃该帧数据**：程序**不会崩溃**，而是直接忽略该帧，不将其推入数据队列。
+3.  **影响**：若仅偶尔丢帧，系统会使用临近帧插值，影响较小；若持续丢帧，自瞄将因缺乏姿态数据而无法正常工作。
 
 ## 参考文献
 [1] Alan Day.【RM2024赛季-识别模型】深圳大学-RobotPilots[EB/OL]. RoboMaster论坛. https://bbs.robomaster.com/article/54091, 2025.
