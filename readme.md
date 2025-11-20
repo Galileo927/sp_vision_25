@@ -602,9 +602,3 @@ RoboMaster 开发板 C 型自带 USB 接口，可以通过固件配置为 USB �
 [8] 王洪玺, 计泽贤, 张兰勇. 基于卡尔曼滤波的目标识别跟踪与射击系统设计[J]. Journal of Ordnance Equipment Engineering, 2022, 43(11). 
 
 
-## 项目成员
-王骁扬、杨佳轩、奚睿豪、俞选涛、吴圳楠、杨瑞灵、程翔宇
-
-
-## Star History
-[![Star History Chart](https://api.star-history.com/svg?repos=TongjiSuperPower/sp_vision_25&type=Date)](https://www.star-history.com/#TongjiSuperPower/sp_vision_25&Date)
