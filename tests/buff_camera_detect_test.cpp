@@ -5,6 +5,7 @@
 
 #include "io/camera.hpp"
 #include "tasks/auto_buff/buff_detector.hpp"
+#include "tasks/auto_buff/buff_solver.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
 #include "tools/logger.hpp"
@@ -28,6 +29,7 @@ int main(int argc, char * argv[])
 
   io::Camera camera(config_path);
   auto_buff::Buff_Detector detector(config_path);
+  auto_buff::Solver solver(config_path);
 
   std::chrono::steady_clock::time_point timestamp;
 
@@ -48,9 +50,9 @@ int main(int argc, char * argv[])
 
     // -------- 可视化检测结果 --------
     if (power_runes.has_value()) {
-      const auto & p = power_runes.value();
+      auto & p = power_runes.value();
       
-      // 绘制检测到的目标点
+      // 绘制检测到的目标点（绿色 - 实际识别）
       for (int i = 0; i < 4; i++) {
         tools::draw_point(img, p.target().points[i], {0, 255, 0}, 3);
       }
@@ -60,6 +62,25 @@ int main(int argc, char * argv[])
       
       // 绘制旋转中心
       tools::draw_point(img, p.r_center, {255, 0, 0}, 5);
+      
+      // -------- 进行 PnP 解算 --------
+      solver.solve(power_runes);
+      
+      // -------- 重投影绘制（红色框 - 理论位置）--------
+      auto image_points = solver.reproject_buff(p.xyz_in_world, p.ypr_in_world[0], p.ypr_in_world[2]);
+      
+      // 绘制前4个点（装甲板的4个角）并连接成矩形
+      for (int i = 0; i < 4; i++) {
+        tools::draw_point(img, image_points[i], {0, 0, 255}, 2);
+        cv::line(img, image_points[i], image_points[(i + 1) % 4], {0, 0, 255}, 2);
+      }
+      
+      // 绘制后面的点（如果有）
+      if (image_points.size() > 4) {
+        for (size_t i = 4; i < image_points.size(); i++) {
+          tools::draw_point(img, image_points[i], {0, 0, 255}, 2);
+        }
+      }
       
       // 输出检测信息
       tools::logger()->info("Power rune detected!");
