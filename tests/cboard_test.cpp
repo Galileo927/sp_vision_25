@@ -12,12 +12,8 @@ using namespace std::chrono_literals;
 
 const std::string keys =
   "{help h usage ? |                       | 输出命令行参数说明}"
-<<<<<<< HEAD
   "{@config-path   | configs/standard3.yaml | yaml配置文件路径 }";
-=======
-  "{@config-path   | configs/sentry.yaml | yaml配置文件路径 }";
->>>>>>> 4c36d5d490277add1c536be45620d60b5f696ae4
-
+  
 int main(int argc, char * argv[])
 {
   cv::CommandLineParser cli(argc, argv, keys);
