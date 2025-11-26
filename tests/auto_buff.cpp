@@ -100,14 +100,13 @@ int main(int argc, char * argv[])
         img, std::vector<cv::Point2f>(image_points.begin(), image_points.begin() + 4), {255, 0, 0});
       tools::draw_points(
         img, std::vector<cv::Point2f>(image_points.begin() + 4, image_points.end()), {255, 0, 0});
+    }
 
-     
     cv::resize(img, img, {}, 0.5, 0.5);
     cv::imshow("result", img);
 
     auto key = cv::waitKey(1);
     if (key == 'q') break;
-    }
   }
   return 0;
 }
