@@ -20,7 +20,7 @@
 // 定义命令行参数
 const std::string keys =
   "{help h usage ? | | 输出命令行参数说明}"
-  "{@config-path   | | yaml配置文件路径 }";
+  "{@config-path   |configs/standard3.yaml | yaml配置文件路径 }";
 
 int main(int argc, char * argv[])
 {
@@ -151,6 +151,9 @@ int main(int argc, char * argv[])
       data["plan_pitch_acc"] = plan.pitch_acc * 57.3;
       data["shoot"] = plan.fire ? 1 : 0;
     }
+
+    // 调试输出数据内容
+    std::cout << "Plotting data: " << data.dump(4) << std::endl;
 
     plotter.plot(data);
 

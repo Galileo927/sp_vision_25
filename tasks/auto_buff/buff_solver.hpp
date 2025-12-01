@@ -32,12 +32,12 @@ public:
     const Eigen::Vector3d & xyz_in_world, double yaw, double row) const;
 
 private:
-  cv::Mat camera_matrix_;
-  cv::Mat distort_coeffs_;
-  Eigen::Matrix3d R_gimbal2imubody_;
-  Eigen::Matrix3d R_camera2gimbal_;
-  Eigen::Vector3d t_camera2gimbal_;
-  Eigen::Matrix3d R_gimbal2world_;
+  cv::Mat camera_matrix_; //相机内参矩阵 cv格式
+  cv::Mat distort_coeffs_; //相机畸变系数 cv格式
+  Eigen::Matrix3d R_gimbal2imubody_; //云台坐标系到IMU机体坐标系的旋转矩阵
+  Eigen::Matrix3d R_camera2gimbal_; //相机坐标系到云台坐标系的旋转矩阵
+  Eigen::Vector3d t_camera2gimbal_; //相机坐标系到云台坐标系的平移向量
+  Eigen::Matrix3d R_gimbal2world_; //云台坐标系到世界坐标系的旋转矩阵
 
   cv::Vec3d rvec_, tvec_;
 
@@ -64,4 +64,4 @@ private:
   void compute_rotated_points(std::vector<std::vector<cv::Point3f>> & object_points);
 };
 }  // namespace auto_buff
-#endif  // AUTO_AIM__SOLVER_HPP
+#endif  

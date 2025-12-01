@@ -28,10 +28,7 @@ public:
 
   explicit FanBlade() = default;
 
-  // explicit FanBlade(const std::vector<cv::Point2f> & kpt, cv::Point2f keypoints_center, FanBlade_type t);
-
-  explicit FanBlade(
-    const std::vector<cv::Point2f> & kpt, cv::Point2f keypoints_center, FanBlade_type t);
+  explicit FanBlade(const std::vector<cv::Point2f> & kpt, cv::Point2f keypoints_center, FanBlade_type t);
 
   explicit FanBlade(FanBlade_type t);
 };
@@ -39,7 +36,7 @@ public:
 class PowerRune
 {
 public:
-  cv::Point2f r_center;
+  cv::Point2f r_center;             // R标
   std::vector<FanBlade> fanblades;  // 按target开始顺时针
 
   int light_num;
