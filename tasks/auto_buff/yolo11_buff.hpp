@@ -17,10 +17,10 @@ class YOLO11_BUFF
 public:
   struct Object
   {
-    cv::Rect_<float> rect;
-    int label;
-    float prob;
-    std::vector<cv::Point2f> kpt;
+    cv::Rect_<float> rect; // 目标框
+    int label; // 目标类别
+    float prob; // 置信度
+    std::vector<cv::Point2f> kpt; // 关键点 6个
   };
 
   YOLO11_BUFF(const std::string & config);
