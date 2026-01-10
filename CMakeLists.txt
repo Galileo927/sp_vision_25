@@ -81,6 +81,9 @@ add_executable(minimum_vision_system tests/minimum_vision_system.cpp)
 add_executable(aim tests/auto_aim.cpp)
 add_executable(buff tests/auto_buff.cpp)
 
+target_link_libraries(aim ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
+target_link_libraries(buff ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
+
 target_link_libraries(auto_aim_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
 target_link_libraries(auto_buff_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
 target_link_libraries(buff_camera_detect_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)

@@ -37,7 +37,7 @@ private:
   ov::CompiledModel compiled_model;
   ov::InferRequest infer_request;
   ov::Tensor input_tensor;
-  const int NUM_POINTS = 6;
+  const int NUM_POINTS = 5;
 
   // 转换图像数据: 先转换元素类型, (可选)然后归一化到[0, 1], (可选)然后交换RB通道
   void convert(

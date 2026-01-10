@@ -38,8 +38,9 @@ cv::Point2f Buff_Detector::get_r_center(std::vector<FanBlade> & fanblades, cv::M
   cv::Point2f r_center_t = {0, 0};
   for (auto & fanblade : fanblades) {
     auto point5 = fanblade.points[4];  // point5是扇叶的中心
-    auto point6 = fanblade.points[5];
-    r_center_t += (point6 - point5) * 1.4 + point5;  // TODO
+    // auto point6 = fanblade.points[5]; // removed to prevent crash
+    // r_center_t += (point6 - point5) * 1.4 + point5;  // TODO
+    r_center_t += point5;
     // r_center_t += 4.7 * point - (4.7 - 1) * fanblade.center;
   }
   r_center_t /= float(fanblades.size());
@@ -49,10 +50,11 @@ cv::Point2f Buff_Detector::get_r_center(std::vector<FanBlade> & fanblades, cv::M
   cv::Mat dilated_img;
   handle_img(bgr_img, dilated_img);
   double radius = cv::norm(fanblades[0].points[2] - fanblades[0].center) * 0.8;
-  cv::Mat mask = cv::Mat::zeros(dilated_img.size(), CV_8U);  // mask
-  circle(mask, r_center_t, radius, cv::Scalar(255), -1);
-  bitwise_and(dilated_img, mask, dilated_img);               // 将遮罩应用于二值化图像
-  tools::draw_point(bgr_img, r_center_t, {255, 255, 0}, 5);  // 调试用
+  // Disable mask because we don't have direction vector (point6) to estimate R center position accurately
+  // cv::Mat mask = cv::Mat::zeros(dilated_img.size(), CV_8U);  // mask
+  // circle(mask, r_center_t, radius, cv::Scalar(255), -1);
+  // bitwise_and(dilated_img, mask, dilated_img);               // 将遮罩应用于二值化图像
+  // tools::draw_point(bgr_img, r_center_t, {255, 255, 0}, 5);  // 调试用
   // cv::imshow("Dilated Image", dilated_img);                // 调试用
 
   /// 获取轮廓点,矩阵框筛选  TODO
@@ -64,6 +66,16 @@ cv::Point2f Buff_Detector::get_r_center(std::vector<FanBlade> & fanblades, cv::M
   double ratio_1 = INF;
   for (auto & it : contours) {
     auto rotated_rect = cv::minAreaRect(it);
+    // Filter out contours that are too close to detected fan blades (likely the fan blades themselves)
+    bool is_fan = false;
+    for (const auto & fb : fanblades) {
+      if (cv::norm(rotated_rect.center - fb.center) < radius) {
+        is_fan = true;
+        break;
+      }
+    }
+    if (is_fan) continue;
+
     double ratio = rotated_rect.size.height > rotated_rect.size.width
                      ? rotated_rect.size.height / rotated_rect.size.width
                      : rotated_rect.size.width / rotated_rect.size.height;
@@ -124,21 +136,56 @@ std::optional<PowerRune> Buff_Detector::detect_24(cv::Mat & bgr_img)
 
 std::optional<PowerRune> Buff_Detector::detect(cv::Mat & bgr_img)
 {
-  /// onnx 模型检测
-
-  std::vector<YOLO11_BUFF::Object> results = MODE_.get_onecandidatebox(bgr_img);
+  // --------------------------------------------------------
+  // 修改：获取所有候选框，以处理大符同时亮起两个扇叶的情况
+  // 原代码：std::vector<YOLO11_BUFF::Object> results = MODE_.get_onecandidatebox(bgr_img);
+  // --------------------------------------------------------
+  std::vector<YOLO11_BUFF::Object> results = MODE_.get_multicandidateboxes(bgr_img);
 
   /// 处理未获得的情况
-
   if (results.empty()) {
     handle_lose();
     return std::nullopt;
   }
 
-  /// results转扇叶FanBlade
+  // --------------------------------------------------------
+  // 新增：目标筛选逻辑 (Target Selection Logic)
+  // --------------------------------------------------------
+  int best_idx = 0;
 
+  if (status_ == TRACK && last_powerrune_.has_value()) {
+    // 【追踪模式】：选择离上一帧目标中心最近的扇叶，实现“锁定”效果，防止跳变
+    double min_dist = 1e9;
+    cv::Point2f last_center = last_powerrune_->target().center; // 获取上一帧扇叶中心
+
+    for (size_t i = 0; i < results.size(); i++) {
+        // kpt[4] 通常是扇叶的中心点 (根据 FanBlade 构造函数推断)
+        double dist = cv::norm(results[i].kpt[4] - last_center);
+        if (dist < min_dist) {
+            min_dist = dist;
+            best_idx = i;
+        }
+    }
+  } else {
+    // 【搜索模式】：如果没有锁定，选择离图像中心最近的扇叶
+    double min_dist = 1e9;
+    cv::Point2f img_center(bgr_img.cols / 2.0f, bgr_img.rows / 2.0f);
+
+    for (size_t i = 0; i < results.size(); i++) {
+        double dist = cv::norm(results[i].kpt[4] - img_center);
+        if (dist < min_dist) {
+            min_dist = dist;
+            best_idx = i;
+        }
+    }
+  }
+  // --------------------------------------------------------
+
+  /// results转扇叶FanBlade
   std::vector<FanBlade> fanblades;
-  auto result = results[0];
+  
+  // 使用筛选出的最佳目标
+  auto result = results[best_idx];
   fanblades.emplace_back(FanBlade(result.kpt, result.kpt[4], _light));
 
   /// 生成PowerRune

@@ -24,9 +24,10 @@ Target::Target() : first_in_(true), unsolvable_(true) {};
 Eigen::Vector3d Target::point_buff2world(const Eigen::Vector3d & point_in_buff) const
 {
   if (unsolvable_) return Eigen::Vector3d(0, 0, 0);
+  //提取旋转参数
   Eigen::Matrix3d R_buff2world =
     tools::rotation_matrix(Eigen::Vector3d(ekf_.x[4], 0.0, ekf_.x[5]));  // pitch = 0
-
+  //提取平移参数
   auto R_yaw = ekf_.x[0];
   auto R_pitch = ekf_.x[2];
   auto R_dis = ekf_.x[3];
@@ -42,7 +43,7 @@ bool Target::is_unsolve() const { return unsolvable_; }
 
 Eigen::VectorXd Target::ekf_x() const { return ekf_.x; }
 
-/// SmallTarget
+// SmallTarget
 
 SmallTarget::SmallTarget() : Target() {}
 
