@@ -27,46 +27,43 @@ void Buff_Detector::handle_img(const cv::Mat & bgr_img, cv::Mat & dilated_img)
 cv::Point2f Buff_Detector::get_r_center(std::vector<FanBlade> & fanblades, cv::Mat & bgr_img)
 {
   /// error
-
   if (fanblades.empty()) {
     tools::logger()->debug("[Buff_Detector] 无法计算r_center!");
     return {0, 0};
   }
 
   /// 算出大概位置
-
+  // 注意：这里仅根据传入的扇叶计算一个参考中心
   cv::Point2f r_center_t = {0, 0};
   for (auto & fanblade : fanblades) {
     auto point5 = fanblade.points[4];  // point5是扇叶的中心
-    // auto point6 = fanblade.points[5]; // removed to prevent crash
-    // r_center_t += (point6 - point5) * 1.4 + point5;  // TODO
     r_center_t += point5;
-    // r_center_t += 4.7 * point - (4.7 - 1) * fanblade.center;
   }
   r_center_t /= float(fanblades.size());
 
   /// 处理图片,mask选出大概范围
-
   cv::Mat dilated_img;
   handle_img(bgr_img, dilated_img);
+  
+  // 半径估计：基于扇叶尺寸的一个比例，用于在二值图中搜索R标轮廓
   double radius = cv::norm(fanblades[0].points[2] - fanblades[0].center) * 0.8;
-  // Disable mask because we don't have direction vector (point6) to estimate R center position accurately
+  
+  // 这里的Mask逻辑被注释了，如果需要更精确的R标搜索，建议恢复并调整
   // cv::Mat mask = cv::Mat::zeros(dilated_img.size(), CV_8U);  // mask
   // circle(mask, r_center_t, radius, cv::Scalar(255), -1);
   // bitwise_and(dilated_img, mask, dilated_img);               // 将遮罩应用于二值化图像
-  // tools::draw_point(bgr_img, r_center_t, {255, 255, 0}, 5);  // 调试用
-  // cv::imshow("Dilated Image", dilated_img);                // 调试用
 
-  /// 获取轮廓点,矩阵框筛选  TODO
-
+  /// 获取轮廓点,矩阵框筛选
   std::vector<std::vector<cv::Point>> contours;
   auto r_center = r_center_t;
   cv::findContours(
     dilated_img, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);  // external找外部区域
-  double ratio_1 = INF;
+  
+  double ratio_1 = 1e9; // INF
   for (auto & it : contours) {
     auto rotated_rect = cv::minAreaRect(it);
-    // Filter out contours that are too close to detected fan blades (likely the fan blades themselves)
+    
+    // 过滤掉离扇叶太近的轮廓（防止把扇叶自己当成R标）
     bool is_fan = false;
     for (const auto & fb : fanblades) {
       if (cv::norm(rotated_rect.center - fb.center) < radius) {
@@ -76,10 +73,12 @@ cv::Point2f Buff_Detector::get_r_center(std::vector<FanBlade> & fanblades, cv::M
     }
     if (is_fan) continue;
 
+    // 形状评分：正方形程度 + 距离中心的权重
     double ratio = rotated_rect.size.height > rotated_rect.size.width
                      ? rotated_rect.size.height / rotated_rect.size.width
                      : rotated_rect.size.width / rotated_rect.size.height;
     ratio += cv::norm(rotated_rect.center - r_center_t) / (radius / 3);
+    
     if (ratio < ratio_1) {
       ratio_1 = ratio;
       r_center = rotated_rect.center;
@@ -101,18 +100,15 @@ void Buff_Detector::handle_lose()
 std::optional<PowerRune> Buff_Detector::detect_24(cv::Mat & bgr_img)
 {
   /// onnx 模型检测
-
   std::vector<YOLO11_BUFF::Object> results = MODE_.get_multicandidateboxes(bgr_img);
 
   /// 处理未获得的情况
-
   if (results.empty()) {
     handle_lose();
     return std::nullopt;
   }
 
   /// results转扇叶FanBlade
-
   std::vector<FanBlade> fanblades;
   for (auto & result : results) fanblades.emplace_back(FanBlade(result.kpt, result.kpt[4], _light));
 
@@ -137,41 +133,52 @@ std::optional<PowerRune> Buff_Detector::detect_24(cv::Mat & bgr_img)
 std::optional<PowerRune> Buff_Detector::detect(cv::Mat & bgr_img)
 {
   // --------------------------------------------------------
-  // 修改：获取所有候选框，以处理大符同时亮起两个扇叶的情况
-  // 原代码：std::vector<YOLO11_BUFF::Object> results = MODE_.get_onecandidatebox(bgr_img);
+  // 第一步：获取所有 YOLO 候选框
   // --------------------------------------------------------
   std::vector<YOLO11_BUFF::Object> results = MODE_.get_multicandidateboxes(bgr_img);
 
-  /// 处理未获得的情况
   if (results.empty()) {
     handle_lose();
     return std::nullopt;
   }
 
   // --------------------------------------------------------
-  // 新增：目标筛选逻辑 (Target Selection Logic)
+  // 第二步：目标筛选与锁定策略 (Target Selection & Locking)
   // --------------------------------------------------------
-  int best_idx = 0;
+  int best_idx = -1;
 
+  // 策略A：【追踪模式】(TRACK)
+  // 如果处于追踪状态且有上一帧的目标记录，优先选择距离上一帧目标最近的那个
   if (status_ == TRACK && last_powerrune_.has_value()) {
-    // 【追踪模式】：选择离上一帧目标中心最近的扇叶，实现“锁定”效果，防止跳变
     double min_dist = 1e9;
-    cv::Point2f last_center = last_powerrune_->target().center; // 获取上一帧扇叶中心
+    // 获取上一帧锁定目标的扇叶中心
+    cv::Point2f last_center = last_powerrune_->target().center; 
 
-    for (size_t i = 0; i < results.size(); i++) {
-        // kpt[4] 通常是扇叶的中心点 (根据 FanBlade 构造函数推断)
+    for (int i = 0; i < results.size(); i++) {
+        // 简单过滤：忽略置信度过低的目标
+        if (results[i].prob < 0.4) continue;
+        
+        // 计算距离：当前检测框中心 vs 上一帧目标中心
+        // 注意：这里假设 kpt[4] 是扇叶中心点，需与 FanBlade 构造函数一致
         double dist = cv::norm(results[i].kpt[4] - last_center);
-        if (dist < min_dist) {
+        
+        // 阈值保护：如果最近的距离也很大（例如 > 200像素），说明可能发生了剧烈跳变或跟丢
+        if (dist < min_dist) { // 可以加 && dist < MAX_JUMP_PIXEL
             min_dist = dist;
             best_idx = i;
         }
     }
-  } else {
-    // 【搜索模式】：如果没有锁定，选择离图像中心最近的扇叶
+  }
+
+  // 策略B：【搜索模式】(LOSE) 或 策略A未选中
+  // 如果没有锁定目标，或者跟丢了，则选择离图像中心最近的目标（方便云台捕获）
+  if (best_idx == -1) {
     double min_dist = 1e9;
     cv::Point2f img_center(bgr_img.cols / 2.0f, bgr_img.rows / 2.0f);
 
-    for (size_t i = 0; i < results.size(); i++) {
+    for (int i = 0; i < results.size(); i++) {
+        if (results[i].prob < 0.4) continue;
+        
         double dist = cv::norm(results[i].kpt[4] - img_center);
         if (dist < min_dist) {
             min_dist = dist;
@@ -179,17 +186,27 @@ std::optional<PowerRune> Buff_Detector::detect(cv::Mat & bgr_img)
         }
     }
   }
-  // --------------------------------------------------------
 
-  /// results转扇叶FanBlade
+  // 如果经过策略A和B还是没找到合适的目标（例如所有目标置信度都低）
+  if (best_idx == -1) {
+      handle_lose();
+      return std::nullopt;
+  }
+
+  // --------------------------------------------------------
+  // 第三步：构造 PowerRune (仅使用选定的最佳目标)
+  // --------------------------------------------------------
   std::vector<FanBlade> fanblades;
   
-  // 使用筛选出的最佳目标
-  auto result = results[best_idx];
-  fanblades.emplace_back(FanBlade(result.kpt, result.kpt[4], _light));
+  // 选中最佳目标
+  auto & best_result = results[best_idx];
+  fanblades.emplace_back(FanBlade(best_result.kpt, best_result.kpt[4], _light));
 
-  /// 生成PowerRune
+  // 计算 R 标中心
+  // 注意：get_r_center 会使用传入的 fanblades 计算。
+  // 虽然只传入一个扇叶可能降低 R 标定位精度，但保证了 PnP 解算的唯一性和稳定性。
   auto r_center = get_r_center(fanblades, bgr_img);
+  
   PowerRune powerrune(fanblades, r_center, last_powerrune_);
 
   /// handle error
