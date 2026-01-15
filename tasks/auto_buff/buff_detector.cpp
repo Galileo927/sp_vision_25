@@ -223,6 +223,195 @@ std::optional<PowerRune> Buff_Detector::detect(cv::Mat & bgr_img)
   return P;
 }
 
+/// 大符快速连续击打模式实现
+std::optional<PowerRune> Buff_Detector::detect_fast_big_rune(cv::Mat & bgr_img, double bullet_speed)
+{
+  // --------------------------------------------------------
+  // 第一步：获取所有 YOLO 候选框
+  // --------------------------------------------------------
+  std::vector<YOLO11_BUFF::Object> results = MODE_.get_multicandidateboxes(bgr_img);
+
+  if (results.empty()) {
+    handle_lose();
+    return std::nullopt;
+  }
+
+  int current_light_num = results.size();
+
+  // --------------------------------------------------------
+  // 第二步：检测大符模式（2个点亮扇叶）
+  // --------------------------------------------------------
+  bool is_big_rune = (current_light_num == 2);
+
+  if (!is_big_rune) {
+    // 小符模式或其他情况，使用原有逻辑
+    last_light_num_ = current_light_num;
+    return detect(bgr_img);
+  }
+
+  // --------------------------------------------------------
+  // 第三步：大符快速击打逻辑
+  // --------------------------------------------------------
+  // 获取或创建策略
+  static BigRuneFastHitStrategy strategy_storage;
+  BigRuneFastHitStrategy & strategy = last_powerrune_.has_value()
+    ? last_powerrune_->fast_hit_strategy
+    : strategy_storage;
+
+  // 检测是否进入新的2扇叶周期
+  if (strategy.detect_new_cycle(current_light_num, last_light_num_)) {
+    strategy.reset();
+    tools::logger()->info("[Buff_Detector] 检测到新的大符周期，重置击打策略");
+  }
+
+  // 更新策略状态
+  double estimated_distance = 0.0;
+  if (last_powerrune_.has_value()) {
+    estimated_distance = last_powerrune_->ypd_in_world[2];  // 使用上一帧的距离
+  } else {
+    estimated_distance = 5.0;  // 默认距离估计
+  }
+
+  double estimated_hit_time = estimate_hit_time(estimated_distance, bullet_speed);
+  strategy.update(estimated_hit_time);
+
+  // --------------------------------------------------------
+  // 第四步：根据策略选择目标
+  // --------------------------------------------------------
+  int target_idx = select_best_target_for_big_rune(results, strategy);
+
+  // --------------------------------------------------------
+  // 第五步：构造 PowerRune（包含双目标信息）
+  // --------------------------------------------------------
+  std::vector<FanBlade> fanblades;
+
+  // 添加所有检测到的扇叶
+  for (size_t i = 0; i < results.size(); ++i) {
+    FanBlade_type type = (i == target_idx) ? _target : _light;
+    fanblades.emplace_back(FanBlade(results[i].kpt, results[i].kpt[4], type));
+  }
+
+  // 计算 R 标中心
+  auto r_center = get_r_center(fanblades, bgr_img);
+
+  // 构造 PowerRune，保留策略状态
+  PowerRune powerrune(fanblades, r_center, last_powerrune_);
+  powerrune.fast_hit_strategy = strategy;
+
+  if (powerrune.is_unsolve()) {
+    handle_lose();
+    return std::nullopt;
+  }
+
+  status_ = TRACK;
+  lose_ = 0;
+  last_light_num_ = current_light_num;
+
+  std::optional<PowerRune> P;
+  P.emplace(powerrune);
+  last_powerrune_ = P;
+
+  // 调试输出
+  tools::logger()->debug("[Buff_Detector] 大符模式 - 阶段: {}, 目标索引: {}/{}",
+    static_cast<int>(strategy.phase),
+    target_idx,
+    results.size() - 1);
+
+  return P;
+}
+
+/// 选择最佳击打目标（大符双目标模式）
+int Buff_Detector::select_best_target_for_big_rune(
+  const std::vector<YOLO11_BUFF::Object> & results,
+  const BigRuneFastHitStrategy & strategy)
+{
+  if (results.size() < 2) {
+    return 0;  // 只有一个目标，直接返回
+  }
+
+  // 根据策略阶段选择目标
+  int desired_idx = strategy.get_target_index();
+
+  // 确保索引有效
+  if (desired_idx >= 0 && desired_idx < static_cast<int>(results.size())) {
+    return desired_idx;
+  }
+
+  // 默认策略：根据旋转方向选择
+  int rotation_direction = 1;  // 默认顺时针，可以从 last_powerrune_ 获取
+  if (last_powerrune_.has_value()) {
+    // 可以从EKF状态获取旋转方向
+    double rotation_angle = last_powerrune_->ypr_in_world[2];
+    rotation_direction = (rotation_angle > 0) ? 1 : -1;
+  }
+
+  return select_target_by_rotation(results, rotation_direction);
+}
+
+/// 根据旋转方向和角度选择最优目标
+int Buff_Detector::select_target_by_rotation(
+  const std::vector<YOLO11_BUFF::Object> & results,
+  int rotation_direction)
+{
+  if (results.size() < 2) {
+    return 0;
+  }
+
+  // 如果没有R标中心信息，选择离图像中心最近的
+  if (!last_powerrune_.has_value()) {
+    cv::Point2f img_center(640, 480);  // 假设图像中心
+    int best_idx = 0;
+    double min_dist = 1e9;
+
+    for (size_t i = 0; i < results.size(); ++i) {
+      double dist = cv::norm(results[i].kpt[4] - img_center);
+      if (dist < min_dist) {
+        min_dist = dist;
+        best_idx = i;
+      }
+    }
+    return best_idx;
+  }
+
+  // 根据旋转方向选择"上游"或"下游"的目标
+  cv::Point2f r_center = last_powerrune_->r_center;
+
+  // 计算每个扇叶相对于R标的角度
+  std::vector<std::pair<double, int>> angle_indices;
+  for (size_t i = 0; i < results.size(); ++i) {
+    cv::Point2f v = results[i].kpt[4] - r_center;
+    double angle = std::atan2(v.y, v.x);  // [-PI, PI]
+    angle_indices.push_back({angle, i});
+  }
+
+  // 按角度排序
+  std::sort(angle_indices.begin(), angle_indices.end());
+
+  // 根据旋转方向选择
+  // 顺时针：选择角度较大的（下一个到达）
+  // 逆时针：选择角度较小的（下一个到达）
+  if (rotation_direction > 0) {
+    return angle_indices.back().second;  // 最大的角度
+  } else {
+    return angle_indices.front().second;  // 最小的角度
+  }
+}
+
+/// 计算估计的击打时间（包括飞行时间和系统延迟）
+double Buff_Detector::estimate_hit_time(double distance, double bullet_speed)
+{
+  // 子弹飞行时间
+  double flight_time = distance / bullet_speed;
+
+  // 系统延迟（包括检测、处理、云台响应等）
+  const double SYSTEM_DELAY = 0.15;  // 150ms
+
+  // 额外的安全裕量
+  const double SAFETY_MARGIN = 0.1;  // 100ms
+
+  return flight_time + SYSTEM_DELAY + SAFETY_MARGIN;
+}
+
 std::optional<PowerRune> Buff_Detector::detect_debug(cv::Mat & bgr_img, cv::Point2f v)
 {
   /// onnx 模型检测
